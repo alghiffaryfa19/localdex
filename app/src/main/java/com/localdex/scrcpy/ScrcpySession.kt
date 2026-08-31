@@ -249,7 +249,7 @@ class ScrcpySession(
                 // Wait a bit to let the system auto-launch whatever it wants on this display
                 delay(3000)
                 try {
-                    val dumpInfo = Adb.runShell(manager, "dumpsys activity activities | grep -E 'Display #$id|Run #|Intent {'")
+                    val dumpInfo = Adb.runShell(manager, "dumpsys activity activities | grep -E 'Display #${id}|Run #|Intent'")
                     Log.i(TAG, "Debug Info on Display $id:\n$dumpInfo")
                     _debugInfo.value = "Activities on Display $id:\n$dumpInfo"
                 } catch (e: Exception) {
