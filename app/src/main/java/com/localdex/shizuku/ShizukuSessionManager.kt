@@ -106,9 +106,9 @@ object ShizukuSessionManager {
                     ComponentName(context.packageName, DexUserService::class.java.name)
                 )
                     .daemon(false)
-                    .processNameSuffix("dex_service_v7")
+                    .processNameSuffix("dex_service_v8")
                     .debuggable(false)
-                    .version(7)
+                    .version(8)
 
                 Shizuku.bindUserService(args, connection)
             } catch (e: Exception) {
