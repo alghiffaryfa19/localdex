@@ -134,6 +134,25 @@ class DexUserService : IDexUserService.Stub() {
                                     else -> 0
                                 }
                             }
+                            type.name.contains("VirtualDisplayConfig") -> {
+                                try {
+                                    val builderClass = Class.forName("android.hardware.display.VirtualDisplayConfig\$Builder")
+                                    val builderConstructor = builderClass.getConstructor(String::class.java, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+                                    val builder = builderConstructor.newInstance(name, width, height, dpi)
+
+                                    val setSurfaceMethod = builderClass.getMethod("setSurface", Surface::class.java)
+                                    setSurfaceMethod.invoke(builder, surface)
+
+                                    val setFlagsMethod = builderClass.getMethod("setFlags", Int::class.javaPrimitiveType)
+                                    setFlagsMethod.invoke(builder, VIRTUAL_DISPLAY_FLAGS)
+
+                                    val buildMethod = builderClass.getMethod("build")
+                                    args[i] = buildMethod.invoke(builder)
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Failed to build VirtualDisplayConfig", e)
+                                    args[i] = null
+                                }
+                            }
                             type.name.contains("IVirtualDisplayCallback") -> args[i] = null
                             type.name.contains("IMediaProjection") -> args[i] = null
                             type == IBinder::class.java -> args[i] = null
@@ -159,9 +178,12 @@ class DexUserService : IDexUserService.Stub() {
                         }
                     }
 
-                    if (displayId >= 0) {
+                    if (displayId > 0) { // displayId 0 is main display, which means it failed or gave us the wrong display
                         Log.i(TAG, "Successfully created VirtualDisplay with ID: $displayId")
                         break
+                    } else {
+                        Log.w(TAG, "Method returned invalid displayId: $displayId")
+                        displayId = -1 // reset so we keep trying
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed overload attempt: ${e.message}")
