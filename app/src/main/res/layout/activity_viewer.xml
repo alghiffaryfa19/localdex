@@ -32,6 +32,23 @@
         android:importantForAccessibility="no"
         android:elevation="10dp" />
 
+    <ScrollView
+        android:id="@+id/debugScroll"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:layout_margin="16dp"
+        android:background="#88000000">
+        <TextView
+            android:id="@+id/debugText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="@color/white"
+            android:textSize="12sp"
+            android:fontFamily="monospace"
+            android:text="Debug info..." />
+    </ScrollView>
+
     <ImageButton
         android:id="@+id/closeButton"
         android:layout_width="40dp"

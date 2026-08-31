@@ -51,6 +51,9 @@ class ScrcpySession(
     private val _state = MutableStateFlow<State>(State.Starting("Connecting…"))
     val state: StateFlow<State> = _state
 
+    private val _debugInfo = MutableStateFlow<String>("")
+    val debugInfo: StateFlow<String> = _debugInfo
+
     // Survives cancellation of callers: stop() must always run to completion so
     // nothing (server process, streams) leaks past the session.
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -242,6 +245,16 @@ class ScrcpySession(
                 Adb.runShell(manager, "wm set-display-windowing-mode -d $id 5")
                 val check = Adb.runShell(manager, "wm get-display-windowing-mode -d $id")
                 Log.i(TAG, "Windowing mode after force: $check")
+                
+                // Wait a bit to let the system auto-launch whatever it wants on this display
+                delay(3000)
+                try {
+                    val dumpInfo = Adb.runShell(manager, "dumpsys activity activities | grep -E 'Display #$id|Run #|Intent {'")
+                    Log.i(TAG, "Debug Info on Display $id:\n$dumpInfo")
+                    _debugInfo.value = "Activities on Display $id:\n$dumpInfo"
+                } catch (e: Exception) {
+                    _debugInfo.value = "Failed to dump activities: ${e.message}"
+                }
             } catch (e: Exception) {
                 Log.w(TAG, "Could not force freeform on display $id", e)
             }

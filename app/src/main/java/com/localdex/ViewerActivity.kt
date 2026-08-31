@@ -111,27 +111,39 @@ class ViewerActivity : AppCompatActivity() {
             }
         }
 
+        observeScrcpyState()
+    }
+
+    private fun observeScrcpyState() {
+        val activeSession = session ?: return
         lifecycleScope.launch {
             activeSession.state.collectLatest { state ->
                 when (state) {
-                    is ScrcpySession.State.Starting -> statusText.text = state.message
+                    is ScrcpySession.State.Starting -> {
+                        statusText.visibility = View.VISIBLE
+                        statusText.text = state.message
+                    }
                     is ScrcpySession.State.Running -> {
                         statusText.visibility = View.GONE
                         applyAspectRatio(state.videoWidth, state.videoHeight)
                         offerSurface()
                     }
                     is ScrcpySession.State.Stopped -> {
-                        if (state.error != null) {
-                            AlertDialog.Builder(this@ViewerActivity)
-                                .setTitle("Session ended")
-                                .setMessage(state.error)
-                                .setPositiveButton("OK") { _, _ -> finish() }
-                                .setOnDismissListener { finish() }
-                                .show()
-                        } else {
-                            finish()
-                        }
+                        statusText.visibility = View.VISIBLE
+                        statusText.text = state.error ?: "Session stopped"
+                        AlertDialog.Builder(this@ViewerActivity)
+                            .setTitle("DeX Session Ended")
+                            .setMessage(state.error ?: "The session was stopped.")
+                            .setPositiveButton("OK") { _, _ -> finish() }
+                            .show()
                     }
+                }
+            }
+        }
+        lifecycleScope.launch {
+            activeSession.debugInfo.collectLatest { info ->
+                findViewById<android.widget.TextView>(R.id.debugText)?.let {
+                    it.text = info
                 }
             }
         }
