@@ -166,15 +166,17 @@ class ViewerActivity : AppCompatActivity() {
     }
 
     /**
-     * Moves the software cursor overlay to the event's position. The cursor is
-     * shown for mouse-source events and hidden for finger touches (the user's
-     * finger IS the cursor on a touchscreen).
+     * Moves the software cursor overlay to the event's position. Always shown
+     * for any pointer event — on mirror-mode HDMI displays the event source may
+     * not report SOURCE_MOUSE even when a physical mouse is in use.
      */
     private fun updateCursor(event: MotionEvent) {
-        val isMouse = (event.source and InputDevice.SOURCE_MOUSE) != 0
-        if (!isMouse) {
-            cursorView.visibility = View.GONE
-            return
+        when (event.actionMasked) {
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                // Hide briefly on finger lift; hover events will re-show it
+                // immediately if a mouse is still moving.
+                return
+            }
         }
 
         // Position the cursor's top-left (hotspot) at the event coordinates,
