@@ -123,7 +123,15 @@ class DexUserService : IDexUserService.Stub() {
                 // Force freeform windowing mode (AOSP Desktop Mode) like LocalDex does
                 Runtime.getRuntime().exec(arrayOf("wm", "set-display-windowing-mode", "-d", id.toString(), "5")).waitFor()
                 
-                // Launch Samsung DeX Launcher specifically to avoid Launcher Chooser dialogs
+                // 1. Launch SystemUI's secondary home (SubHomeActivity on Z Flip) to trigger wallpaper rendering
+                android.util.Log.i(TAG, "Launching SystemUI (SubHomeActivity) for wallpaper on display $id...")
+                Runtime.getRuntime().exec(arrayOf(
+                    "am", "start",
+                    "-n", "com.android.systemui/.subscreen.SubHomeActivity",
+                    "--display", id.toString()
+                )).waitFor()
+
+                // 2. Launch Samsung DeX Launcher specifically to avoid Launcher Chooser dialogs
                 android.util.Log.i(TAG, "Launching DeX on display $id via shell...")
                 Runtime.getRuntime().exec(arrayOf(
                     "am", "start",
@@ -131,14 +139,7 @@ class DexUserService : IDexUserService.Stub() {
                     "--display", id.toString()
                 )).waitFor()
 
-                // Launch DexModeActivity to ensure the environment (taskbar, window management) is initialized
-                android.util.Log.i(TAG, "Initializing DexModeActivity on display $id...")
-                Runtime.getRuntime().exec(arrayOf(
-                    "am", "start",
-                    "-n", "com.android.settings/.Settings\$DexModeActivity",
-                    "--display", id.toString()
-                )).waitFor()
-                
+
                 id.toString()
             } else {
                 "Error: virtualDisplay is null"
