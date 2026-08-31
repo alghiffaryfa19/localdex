@@ -7,7 +7,7 @@ import android.view.KeyEvent;
 interface IDexUserService {
     void destroy();
 
-    int createVirtualDisplay(String name, int width, int height, int dpi, in Surface surface);
+    String createVirtualDisplay(String name, int width, int height, int dpi, in Surface surface);
     void releaseVirtualDisplay();
     int getDisplayId();
 

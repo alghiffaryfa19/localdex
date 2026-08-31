@@ -106,9 +106,9 @@ object ShizukuSessionManager {
                     ComponentName(context.packageName, DexUserService::class.java.name)
                 )
                     .daemon(false)
-                    .processNameSuffix("dex_service")
+                    .processNameSuffix("dex_service_v4")
                     .debuggable(false)
-                    .version(3)
+                    .version(4)
 
                 Shizuku.bindUserService(args, connection)
             } catch (e: Exception) {
@@ -140,21 +140,25 @@ object ShizukuSessionManager {
         }
 
         return try {
-            val displayId = service.createVirtualDisplay(
+            val result = service.createVirtualDisplay(
                 "LocalDex-Direct",
                 width,
                 height,
                 dpi,
                 surface
             )
-
-            currentDisplayId = displayId
-            if (displayId >= 0) {
+            
+            val displayId = result.toIntOrNull()
+            
+            if (displayId != null) {
+                currentDisplayId = displayId
                 Log.i(TAG, "Direct Surface VirtualDisplay created with ID: $displayId")
                 _state.value = State.Running(displayId, width, height)
                 true
             } else {
-                _state.value = State.Error("Failed to create virtual display (ID: $displayId)")
+                currentDisplayId = -1
+                Log.e(TAG, "Failed to create virtual display: $result")
+                _state.value = State.Error("Failed to create virtual display: $result")
                 false
             }
         } catch (e: Exception) {
