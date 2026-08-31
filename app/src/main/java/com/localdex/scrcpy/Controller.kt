@@ -302,13 +302,19 @@ class Controller(
                 }
             }
             MotionEvent.ACTION_BUTTON_PRESS -> {
-                sendMouse(MotionEvent.ACTION_DOWN, x, y, videoWidth, videoHeight, 1f,
-                    event.actionButton, event.buttonState)
+                // Primary button (left-click) is already handled by the touch listener
+                // via ACTION_DOWN/ACTION_UP — skip it here to avoid double events.
+                if (event.actionButton != BUTTON_PRIMARY) {
+                    sendMouse(MotionEvent.ACTION_DOWN, x, y, videoWidth, videoHeight, 1f,
+                        event.actionButton, event.buttonState)
+                }
             }
             MotionEvent.ACTION_BUTTON_RELEASE -> {
-                // buttonState already has the released button removed
-                sendMouse(MotionEvent.ACTION_UP, x, y, videoWidth, videoHeight, 0f,
-                    event.actionButton, event.buttonState)
+                if (event.actionButton != BUTTON_PRIMARY) {
+                    // buttonState already has the released button removed
+                    sendMouse(MotionEvent.ACTION_UP, x, y, videoWidth, videoHeight, 0f,
+                        event.actionButton, event.buttonState)
+                }
             }
         }
     }
