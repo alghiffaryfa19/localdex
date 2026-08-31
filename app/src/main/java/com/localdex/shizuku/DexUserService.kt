@@ -19,12 +19,14 @@ class DexUserService : IDexUserService.Stub() {
         private const val VIRTUAL_DISPLAY_FLAG_PUBLIC = 1 shl 0
         private const val VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY = 1 shl 3
         private const val VIRTUAL_DISPLAY_FLAG_DESTROY_CONTENT_ON_REMOVAL = 1 shl 8
+        private const val VIRTUAL_DISPLAY_FLAG_SHOULD_SHOW_SYSTEM_DECORATIONS = 1 shl 9
         private const val VIRTUAL_DISPLAY_FLAG_TRUSTED = 1 shl 10
 
         private const val VIRTUAL_DISPLAY_FLAGS =
             VIRTUAL_DISPLAY_FLAG_PUBLIC or
             VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY or
             VIRTUAL_DISPLAY_FLAG_DESTROY_CONTENT_ON_REMOVAL or
+            VIRTUAL_DISPLAY_FLAG_SHOULD_SHOW_SYSTEM_DECORATIONS or
             VIRTUAL_DISPLAY_FLAG_TRUSTED
     }
 
@@ -130,22 +132,6 @@ class DexUserService : IDexUserService.Stub() {
                     "-a", "android.intent.action.MAIN",
                     "-c", "android.intent.category.SECONDARY_HOME",
                     "-n", "com.sec.android.app.launcher/com.honeyspace.dexservice.SecondaryLauncher",
-                    "--display", id.toString()
-                )).waitFor()
-
-                // 2. Launch RecentsActivity
-                android.util.Log.i(TAG, "Launching RecentsActivity on display $id...")
-                Runtime.getRuntime().exec(arrayOf(
-                    "am", "start",
-                    "-n", "com.sec.android.app.launcher/com.android.quickstep.RecentsActivity",
-                    "--display", id.toString()
-                )).waitFor()
-
-                // 3. Launch SystemUI SubHomeActivity
-                android.util.Log.i(TAG, "Launching SubHomeActivity on display $id...")
-                Runtime.getRuntime().exec(arrayOf(
-                    "am", "start",
-                    "-n", "com.android.systemui/.subscreen.SubHomeActivity",
                     "--display", id.toString()
                 )).waitFor()
 
