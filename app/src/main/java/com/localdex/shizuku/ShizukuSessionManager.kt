@@ -108,7 +108,7 @@ object ShizukuSessionManager {
                     .daemon(false)
                     .processNameSuffix("dex_service")
                     .debuggable(false)
-                    .version(2)
+                    .version(3)
 
                 Shizuku.bindUserService(args, connection)
             } catch (e: Exception) {
