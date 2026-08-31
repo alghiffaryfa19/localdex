@@ -83,6 +83,16 @@ class ViewerActivity : AppCompatActivity() {
             true
         }
 
+        // Physical mouse: hover moves, scroll wheel, right-click, middle-click.
+        // These arrive as generic motion events, not touch events.
+        surfaceView.setOnGenericMotionListener { view, event ->
+            val s = session ?: return@setOnGenericMotionListener false
+            s.controller?.forwardGenericMotionEvent(
+                event, view.width, view.height, s.videoWidth, s.videoHeight
+            )
+            true
+        }
+
         makeCloseButtonDraggable()
 
         // Fold/unfold and rotation change the container size without recreating the

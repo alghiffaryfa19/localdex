@@ -1,6 +1,7 @@
 package com.localdex.scrcpy
 
 import android.util.Log
+import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import java.io.IOException
@@ -19,7 +20,10 @@ import java.util.concurrent.LinkedBlockingQueue
  * touchscreen pointer, while the mouse drag path works — it's the same reason
  * window dragging works from desktop scrcpy.
  *
- * Gestures: one finger = mouse click/drag; two fingers = scroll wheel.
+ * When input comes from a physical mouse (SOURCE_MOUSE), the actual button
+ * state (right-click, middle-click, scroll wheel) is forwarded natively.
+ * For touchscreen input, gestures are translated: one finger = left click/drag;
+ * two fingers = scroll wheel.
  *
  * Writes happen on a dedicated thread so touch handling never blocks the UI
  * thread on a socket.
@@ -131,6 +135,7 @@ class Controller(
         videoHeight: Int,
         hScroll: Float,
         vScroll: Float,
+        buttons: Int = 0,
     ) {
         val buffer = ByteBuffer.allocate(21)
         buffer.put(TYPE_INJECT_SCROLL_EVENT.toByte())
@@ -140,7 +145,7 @@ class Controller(
         buffer.putShort(videoHeight.toShort())
         buffer.putShort(scrollToI16FixedPoint(hScroll))
         buffer.putShort(scrollToI16FixedPoint(vScroll))
-        buffer.putInt(0) // buttons
+        buffer.putInt(buttons)
         queue.offer(buffer.array())
     }
 
@@ -151,11 +156,20 @@ class Controller(
     private var gesture = Gesture.NONE
     private var lastX = 0
     private var lastY = 0
+    /** The button that was pressed in the current mouse gesture (for UP). */
+    private var pressedButton = BUTTON_PRIMARY
+
+    private fun isMouseSource(event: MotionEvent): Boolean =
+        (event.source and InputDevice.SOURCE_MOUSE) != 0
 
     /**
      * Forwards a [MotionEvent] from a view of size [viewWidth]x[viewHeight] that shows
      * the video letterbox-free (the viewer sizes its SurfaceView to the exact aspect
      * ratio, so a plain scale maps view space to video space).
+     *
+     * When the event source is a physical mouse, actual button state (right-click,
+     * middle-click) is forwarded. For touchscreen input, the original touch-to-mouse
+     * translation is used.
      */
     fun forwardMotionEvent(
         event: MotionEvent,
@@ -184,19 +198,26 @@ class Controller(
             return sum / event.pointerCount
         }
 
+        val isMouse = isMouseSource(event)
+
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 gesture = Gesture.MOUSE
                 lastX = videoX(0)
                 lastY = videoY(0)
+
+                val actionBtn = if (isMouse && event.actionButton != 0) event.actionButton else BUTTON_PRIMARY
+                val buttons = if (isMouse) event.buttonState else BUTTON_PRIMARY
+                pressedButton = actionBtn
+
                 // Move the pointer to the spot first, like a real mouse would.
                 sendMouse(MotionEvent.ACTION_HOVER_MOVE, lastX, lastY, videoWidth, videoHeight, 0f, 0, 0)
-                sendMouse(MotionEvent.ACTION_DOWN, lastX, lastY, videoWidth, videoHeight, 1f, BUTTON_PRIMARY, BUTTON_PRIMARY)
+                sendMouse(MotionEvent.ACTION_DOWN, lastX, lastY, videoWidth, videoHeight, 1f, actionBtn, buttons)
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
-                if (gesture == Gesture.MOUSE) {
-                    // Second finger: this is a scroll, not a drag — release the button.
-                    sendMouse(MotionEvent.ACTION_UP, lastX, lastY, videoWidth, videoHeight, 0f, BUTTON_PRIMARY, 0)
+                if (!isMouse && gesture == Gesture.MOUSE) {
+                    // Second finger on touchscreen: this is a scroll, not a drag — release.
+                    sendMouse(MotionEvent.ACTION_UP, lastX, lastY, videoWidth, videoHeight, 0f, pressedButton, 0)
                     gesture = Gesture.SCROLL
                     lastX = centroidX()
                     lastY = centroidY()
@@ -207,7 +228,8 @@ class Controller(
                     Gesture.MOUSE -> {
                         lastX = videoX(0)
                         lastY = videoY(0)
-                        sendMouse(MotionEvent.ACTION_MOVE, lastX, lastY, videoWidth, videoHeight, 1f, 0, BUTTON_PRIMARY)
+                        val buttons = if (isMouse) event.buttonState else pressedButton
+                        sendMouse(MotionEvent.ACTION_MOVE, lastX, lastY, videoWidth, videoHeight, 1f, 0, buttons)
                     }
                     Gesture.SCROLL -> {
                         val cx = centroidX()
@@ -229,21 +251,64 @@ class Controller(
             }
             MotionEvent.ACTION_POINTER_UP -> {
                 if (gesture == Gesture.SCROLL && event.pointerCount <= 2) {
-                    // Dropping back to one finger; ignore the remainder of the gesture.
                     gesture = Gesture.DONE
                 }
             }
             MotionEvent.ACTION_UP -> {
                 if (gesture == Gesture.MOUSE) {
-                    sendMouse(MotionEvent.ACTION_UP, videoX(0), videoY(0), videoWidth, videoHeight, 0f, BUTTON_PRIMARY, 0)
+                    val actionBtn = if (isMouse && event.actionButton != 0) event.actionButton else pressedButton
+                    sendMouse(MotionEvent.ACTION_UP, videoX(0), videoY(0), videoWidth, videoHeight, 0f, actionBtn, 0)
                 }
                 gesture = Gesture.NONE
             }
             MotionEvent.ACTION_CANCEL -> {
                 if (gesture == Gesture.MOUSE) {
-                    sendMouse(MotionEvent.ACTION_UP, lastX, lastY, videoWidth, videoHeight, 0f, BUTTON_PRIMARY, 0)
+                    sendMouse(MotionEvent.ACTION_UP, lastX, lastY, videoWidth, videoHeight, 0f, pressedButton, 0)
                 }
                 gesture = Gesture.NONE
+            }
+        }
+    }
+
+    /**
+     * Forwards generic motion events (hover, scroll wheel, button press/release) from
+     * a physical mouse. Called via the view's OnGenericMotionListener.
+     */
+    fun forwardGenericMotionEvent(
+        event: MotionEvent,
+        viewWidth: Int,
+        viewHeight: Int,
+        videoWidth: Int,
+        videoHeight: Int,
+    ) {
+        if (viewWidth == 0 || viewHeight == 0 || videoWidth == 0 || videoHeight == 0) return
+
+        val x = (event.x * videoWidth / viewWidth).toInt().coerceIn(0, videoWidth - 1)
+        val y = (event.y * videoHeight / viewHeight).toInt().coerceIn(0, videoHeight - 1)
+
+        when (event.actionMasked) {
+            MotionEvent.ACTION_HOVER_MOVE,
+            MotionEvent.ACTION_HOVER_ENTER -> {
+                sendMouse(MotionEvent.ACTION_HOVER_MOVE, x, y, videoWidth, videoHeight, 0f, 0, event.buttonState)
+            }
+            MotionEvent.ACTION_HOVER_EXIT -> {
+                sendMouse(MotionEvent.ACTION_HOVER_EXIT, x, y, videoWidth, videoHeight, 0f, 0, event.buttonState)
+            }
+            MotionEvent.ACTION_SCROLL -> {
+                val hScroll = event.getAxisValue(MotionEvent.AXIS_HSCROLL)
+                val vScroll = event.getAxisValue(MotionEvent.AXIS_VSCROLL)
+                if (hScroll != 0f || vScroll != 0f) {
+                    sendScroll(x, y, videoWidth, videoHeight, hScroll, vScroll, event.buttonState)
+                }
+            }
+            MotionEvent.ACTION_BUTTON_PRESS -> {
+                sendMouse(MotionEvent.ACTION_DOWN, x, y, videoWidth, videoHeight, 1f,
+                    event.actionButton, event.buttonState)
+            }
+            MotionEvent.ACTION_BUTTON_RELEASE -> {
+                // buttonState already has the released button removed
+                sendMouse(MotionEvent.ACTION_UP, x, y, videoWidth, videoHeight, 0f,
+                    event.actionButton, event.buttonState)
             }
         }
     }
