@@ -2,13 +2,16 @@ package com.localdex
 
 import android.annotation.SuppressLint
 import android.os.Bundle
+import android.view.InputDevice
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -33,6 +36,7 @@ class ViewerActivity : AppCompatActivity() {
     private lateinit var surfaceView: SurfaceView
     private lateinit var statusText: TextView
     private lateinit var closeButton: ImageButton
+    private lateinit var cursorView: ImageView
 
     private var surfaceReady = false
     private var surfaceGivenToDecoder = false
@@ -55,6 +59,7 @@ class ViewerActivity : AppCompatActivity() {
         surfaceView = findViewById(R.id.surfaceView)
         statusText = findViewById(R.id.viewerStatus)
         closeButton = findViewById(R.id.closeButton)
+        cursorView = findViewById(R.id.cursorView)
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         hideSystemBars()
@@ -80,6 +85,7 @@ class ViewerActivity : AppCompatActivity() {
             s.controller?.forwardMotionEvent(
                 event, view.width, view.height, s.videoWidth, s.videoHeight
             )
+            updateCursor(event)
             true
         }
 
@@ -90,6 +96,7 @@ class ViewerActivity : AppCompatActivity() {
             s.controller?.forwardGenericMotionEvent(
                 event, view.width, view.height, s.videoWidth, s.videoHeight
             )
+            updateCursor(event)
             true
         }
 
@@ -155,6 +162,30 @@ class ViewerActivity : AppCompatActivity() {
             params.height = (videoHeight * scale).toInt()
             params.gravity = android.view.Gravity.CENTER
             surfaceView.layoutParams = params
+        }
+    }
+
+    /**
+     * Moves the software cursor overlay to the event's position. The cursor is
+     * shown for mouse-source events and hidden for finger touches (the user's
+     * finger IS the cursor on a touchscreen).
+     */
+    private fun updateCursor(event: MotionEvent) {
+        val isMouse = (event.source and InputDevice.SOURCE_MOUSE) != 0
+        if (!isMouse) {
+            cursorView.visibility = View.GONE
+            return
+        }
+
+        // Position the cursor's top-left (hotspot) at the event coordinates,
+        // translated into the root FrameLayout's coordinate space.
+        val loc = IntArray(2)
+        surfaceView.getLocationInWindow(loc)
+        cursorView.translationX = loc[0] + event.x
+        cursorView.translationY = loc[1] + event.y
+
+        if (cursorView.visibility != View.VISIBLE) {
+            cursorView.visibility = View.VISIBLE
         }
     }
 

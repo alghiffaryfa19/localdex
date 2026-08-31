@@ -21,6 +21,17 @@
         android:textSize="16sp"
         android:text="Starting…" />
 
+    <!-- Software cursor overlay: always visible regardless of display routing -->
+    <ImageView
+        android:id="@+id/cursorView"
+        android:layout_width="24dp"
+        android:layout_height="24dp"
+        android:layout_gravity="top|start"
+        android:src="@drawable/ic_cursor"
+        android:visibility="gone"
+        android:importantForAccessibility="no"
+        android:elevation="10dp" />
+
     <ImageButton
         android:id="@+id/closeButton"
         android:layout_width="40dp"

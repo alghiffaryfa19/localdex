@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Classic arrow cursor with shadow for visibility on any background -->
+    <!-- Shadow / outline -->
+    <path
+        android:fillColor="#AA000000"
+        android:pathData="M3,2 L3,20 L8.5,14.5 L13,22 L16,20.5 L11.5,13 L19,13 Z" />
+    <!-- White fill -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M4.5,4.5 L4.5,17.5 L8.5,13.5 L12.5,20 L14.5,19 L10.5,12.5 L17,12 Z" />
+</vector>
