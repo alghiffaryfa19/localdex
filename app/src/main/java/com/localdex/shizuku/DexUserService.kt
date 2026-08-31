@@ -123,6 +123,14 @@ class DexUserService : IDexUserService.Stub() {
                 // Force freeform windowing mode (AOSP Desktop Mode) like LocalDex does
                 Runtime.getRuntime().exec(arrayOf("wm", "set-display-windowing-mode", "-d", id.toString(), "5")).waitFor()
                 
+                // Launch Samsung DeX Launcher specifically
+                android.util.Log.i(TAG, "Launching DeX on display $id via shell...")
+                Runtime.getRuntime().exec(arrayOf(
+                    "am", "start",
+                    "-n", "com.sec.android.app.launcher/com.honeyspace.dexservice.SecondaryLauncher",
+                    "--display", id.toString()
+                )).waitFor()
+                
                 id.toString()
             } else {
                 "Error: virtualDisplay is null"
