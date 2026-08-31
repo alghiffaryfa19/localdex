@@ -36,7 +36,19 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Display (WIDTHxHEIGHT/DPI)"
+                android:text="Target Display"
+                android:textStyle="bold" />
+
+            <Spinner
+                android:id="@+id/targetDisplaySpinner"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Display Spec (WIDTHxHEIGHT/DPI)"
                 android:textStyle="bold" />
 
             <EditText

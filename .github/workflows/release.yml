@@ -2,8 +2,6 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*.*.*'
 
 permissions:
   contents: write
@@ -16,41 +14,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Resolve version from the release tag
-        id: version
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          if [[ ! "$TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-            echo "Tag '${TAG}' is not a vMAJOR.MINOR.PATCH release tag." >&2
-            exit 1
-          fi
-          major="${BASH_REMATCH[1]}"
-          minor="${BASH_REMATCH[2]}"
-          patch="${BASH_REMATCH[3]}"
-          # Derived from the version itself so it only ever grows and never has to
-          # be remembered (same scheme as anyapk).
-          code=$(( major * 10000 + minor * 100 + patch ))
-          echo "version=${major}.${minor}.${patch}" >> "$GITHUB_OUTPUT"
-          echo "versionCode=${code}" >> "$GITHUB_OUTPUT"
-          echo "Releasing ${TAG} as versionCode ${code}"
-
-      # The build comes from the tag itself, not from whatever main has moved on
-      # to since.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref_name }}
           fetch-depth: 1
-
-      - name: Align version for build
-        run: |
-          set -euo pipefail
-          version="${{ steps.version.outputs.version }}"
-          code="${{ steps.version.outputs.versionCode }}"
-          sed -i -E "s/(versionName\s*=\s*)\"[^\"]+\"/\1\"${version}\"/" app/build.gradle.kts
-          sed -i -E "s/(versionCode\s*=\s*)[0-9]+/\1${code}/" app/build.gradle.kts
-          grep -E 'versionName|versionCode' app/build.gradle.kts
 
       # Debug builds are signed with the runner's auto-generated debug keystore.
       # Cache it under a fixed key so every release carries the same signature —
@@ -71,12 +37,11 @@ jobs:
       - name: Build debug APK
         run: ./gradlew --no-daemon assembleDebug
 
-      - name: Stage APK with release name
+      - name: Stage APK
         run: |
           set -euo pipefail
           mkdir -p release
-          cp app/build/outputs/apk/debug/app-debug.apk \
-             "release/localdex-${{ steps.version.outputs.version }}-debug.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk release/localdex-debug.apk
           ls -la release/
 
       - uses: actions/upload-artifact@v4
@@ -85,13 +50,3 @@ jobs:
           path: release/*.apk
           retention-days: 7
           if-no-files-found: error
-
-      - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          # The tag already exists and already points at the right commit; this
-          # only attaches the build to it.
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
-          generate_release_notes: true
-          files: release/localdex-${{ steps.version.outputs.version }}-debug.apk

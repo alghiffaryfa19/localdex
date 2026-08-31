@@ -81,12 +81,16 @@ class DexService : Service() {
             Intent(this, DexService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+        val targetDisplayId = Prefs.getTargetDisplayId(this)
+        val options = android.app.ActivityOptions.makeBasic().setLaunchDisplayId(targetDisplayId).toBundle()
+
         val openIntent = PendingIntent.getActivity(
             this,
             2,
             Intent(this, ViewerActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            options
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)

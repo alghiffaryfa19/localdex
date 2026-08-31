@@ -25,4 +25,11 @@ object Prefs {
     fun setDisplaySpec(context: Context, spec: String) {
         prefs(context).edit().putString(KEY_DISPLAY_SPEC, spec).apply()
     }
+
+    fun getTargetDisplayId(context: Context): Int =
+        prefs(context).getInt("target_display_id", 0)
+
+    fun setTargetDisplayId(context: Context, displayId: Int) {
+        prefs(context).edit().putInt("target_display_id", displayId).apply()
+    }
 }

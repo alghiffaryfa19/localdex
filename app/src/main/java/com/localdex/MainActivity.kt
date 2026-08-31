@@ -22,10 +22,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var actionButton: Button
     private lateinit var refreshButton: Button
     private lateinit var configGroup: View
+    private lateinit var targetDisplaySpinner: android.widget.Spinner
     private lateinit var displaySpecField: EditText
     private lateinit var startButton: Button
     private lateinit var viewerButton: Button
     private lateinit var stopButton: Button
+
+    private val displays = mutableListOf<android.view.Display>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -35,22 +38,58 @@ class MainActivity : AppCompatActivity() {
         actionButton = findViewById(R.id.actionButton)
         refreshButton = findViewById(R.id.refreshButton)
         configGroup = findViewById(R.id.configGroup)
+        targetDisplaySpinner = findViewById(R.id.targetDisplaySpinner)
         displaySpecField = findViewById(R.id.displaySpecField)
         startButton = findViewById(R.id.startButton)
         viewerButton = findViewById(R.id.viewerButton)
         stopButton = findViewById(R.id.stopButton)
 
+        setupDisplaySpinner()
         displaySpecField.setText(Prefs.getDisplaySpec(this))
 
         refreshButton.setOnClickListener { checkStatus(forceCheck = true) }
         startButton.setOnClickListener { startDex() }
-        viewerButton.setOnClickListener {
-            startActivity(Intent(this, ViewerActivity::class.java))
-        }
+        viewerButton.setOnClickListener { openViewer() }
         stopButton.setOnClickListener {
             DexService.stop(this)
             statusText.postDelayed({ checkStatus() }, 500)
         }
+    }
+
+    private fun setupDisplaySpinner() {
+        val displayManager = getSystemService(android.content.Context.DISPLAY_SERVICE) as android.hardware.display.DisplayManager
+        displays.clear()
+        displays.addAll(displayManager.displays)
+
+        val adapter = android.widget.ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_item,
+            displays.map { "${it.name} (${it.displayId}) - ${it.mode.physicalWidth}x${it.mode.physicalHeight}" }
+        )
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        targetDisplaySpinner.adapter = adapter
+
+        val savedDisplayId = Prefs.getTargetDisplayId(this)
+        val selectedIndex = displays.indexOfFirst { it.displayId == savedDisplayId }.takeIf { it >= 0 } ?: 0
+        targetDisplaySpinner.setSelection(selectedIndex)
+
+        targetDisplaySpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val display = displays[position]
+                Prefs.setTargetDisplayId(this@MainActivity, display.displayId)
+                // Use comfortable DPI (240) by default
+                val spec = "${display.mode.physicalWidth}x${display.mode.physicalHeight}/240"
+                displaySpecField.setText(spec)
+                Prefs.setDisplaySpec(this@MainActivity, spec)
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
+    }
+
+    private fun openViewer() {
+        val targetDisplayId = Prefs.getTargetDisplayId(this)
+        val options = android.app.ActivityOptions.makeBasic().setLaunchDisplayId(targetDisplayId).toBundle()
+        startActivity(Intent(this, ViewerActivity::class.java), options)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -237,7 +276,7 @@ class MainActivity : AppCompatActivity() {
         Prefs.setDisplaySpec(this, spec)
 
         DexService.start(this)
-        startActivity(Intent(this, ViewerActivity::class.java))
+        openViewer()
     }
 
     private fun isDeveloperOptionsEnabled(): Boolean {
