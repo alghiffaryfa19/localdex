@@ -144,7 +144,6 @@ class ViewerActivity : AppCompatActivity() {
                     is ShizukuSessionManager.State.Running -> {
                         statusText.visibility = View.GONE
                         applyAspectRatio(state.width, state.height)
-                        launchDeXOnDisplay(state.displayId)
                     }
                     is ShizukuSessionManager.State.Error -> {
                         statusText.visibility = View.VISIBLE
@@ -157,32 +156,6 @@ class ViewerActivity : AppCompatActivity() {
                     }
                 }
             }
-        }
-    }
-
-    private fun launchDeXOnDisplay(displayId: Int) {
-        try {
-            android.widget.Toast.makeText(this, "Starting DeX on Virtual Display $displayId...", android.widget.Toast.LENGTH_SHORT).show()
-            val primaryIntent = android.content.Intent().apply {
-                setClassName("com.sec.android.app.launcher", "com.honeyspace.dexservice.SecondaryLauncher")
-                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
-            }
-            
-            val options = android.app.ActivityOptions.makeBasic()
-            options.launchDisplayId = displayId
-            
-            if (primaryIntent.resolveActivity(packageManager) != null) {
-                startActivity(primaryIntent, options.toBundle())
-            } else {
-                val fallbackIntent = android.content.Intent(android.content.Intent.ACTION_MAIN).apply {
-                    addCategory(android.content.Intent.CATEGORY_SECONDARY_HOME)
-                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
-                }
-                startActivity(fallbackIntent, options.toBundle())
-            }
-        } catch (e: Exception) {
-            android.util.Log.e("ViewerActivity", "Failed to launch DeX", e)
-            android.widget.Toast.makeText(this, "Failed to launch DeX: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
         }
     }
 
