@@ -14,7 +14,8 @@ class DexUserService : IDexUserService.Stub() {
     companion object {
         private const val TAG = "DexUserService"
 
-        // VirtualDisplay flags: PUBLIC | OWN_CONTENT_ONLY | DESTROY_CONTENT_ON_REMOVAL | TRUSTED
+        // VirtualDisplay flags:
+        // PUBLIC (1) | OWN_CONTENT_ONLY (8) | DESTROY_CONTENT_ON_REMOVAL (256) | TRUSTED (1024)
         private const val VIRTUAL_DISPLAY_FLAG_PUBLIC = 1 shl 0
         private const val VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY = 1 shl 3
         private const val VIRTUAL_DISPLAY_FLAG_DESTROY_CONTENT_ON_REMOVAL = 1 shl 8
@@ -73,7 +74,7 @@ class DexUserService : IDexUserService.Stub() {
                 // optional
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize InputManager via reflection", e)
+            Log.e(TAG, "Failed to initialize InputManager", e)
         }
     }
 
@@ -85,7 +86,7 @@ class DexUserService : IDexUserService.Stub() {
         surface: Surface
     ): Int {
         releaseVirtualDisplay()
-        Log.i(TAG, "Creating VirtualDisplay: $name ($width x $height @ $dpi dpi)")
+        Log.i(TAG, "Creating VirtualDisplay: $name ($width x $height @ $dpi dpi, surface: $surface)")
 
         try {
             val serviceManagerClass = Class.forName("android.os.ServiceManager")
@@ -95,113 +96,124 @@ class DexUserService : IDexUserService.Stub() {
             val iDisplayManagerClass = Class.forName("android.hardware.display.IDisplayManager\$Stub")
             val asInterfaceMethod = iDisplayManagerClass.getMethod("asInterface", IBinder::class.java)
             val displayManagerService = asInterfaceMethod.invoke(null, displayBinder)
+                ?: throw RuntimeException("IDisplayManager service is null")
 
-            // Look for createVirtualDisplay in IDisplayManager
-            val methods = displayManagerService?.javaClass?.methods ?: emptyArray()
-            val createMethod = methods.firstOrNull { it.name == "createVirtualDisplay" }
-                ?: throw NoSuchMethodException("createVirtualDisplay method not found on IDisplayManager")
+            var displayId = -1
 
-            val paramTypes = createMethod.parameterTypes
-            val args = arrayOfNulls<Any>(paramTypes.size)
+            // Try all createVirtualDisplay method overloads on IDisplayManager
+            val methods = displayManagerService.javaClass.methods.filter { it.name == "createVirtualDisplay" }
+            Log.i(TAG, "Found ${methods.size} createVirtualDisplay method overloads on IDisplayManager")
 
-            for (i in paramTypes.indices) {
-                when {
-                    paramTypes[i] == String::class.java && i == 0 -> args[i] = null // callback or packageName
-                    paramTypes[i] == String::class.java -> args[i] = if (args[0] == null && i == 2) "com.android.shell" else name
-                    paramTypes[i] == Int::class.javaPrimitiveType -> {
-                        // Match width, height, dpi, flags
-                        val remainingInts = paramTypes.take(i + 1).count { it == Int::class.javaPrimitiveType }
-                        args[i] = when (remainingInts) {
-                            1 -> width
-                            2 -> height
-                            3 -> dpi
-                            4 -> VIRTUAL_DISPLAY_FLAGS
-                            else -> 0
+            for (method in methods) {
+                try {
+                    val paramTypes = method.parameterTypes
+                    val args = arrayOfNulls<Any>(paramTypes.size)
+
+                    var stringCount = 0
+                    var intCount = 0
+
+                    for (i in paramTypes.indices) {
+                        val type = paramTypes[i]
+                        when {
+                            type == Surface::class.java -> args[i] = surface
+                            type == String::class.java -> {
+                                stringCount++
+                                args[i] = when (stringCount) {
+                                    1 -> "com.android.shell" // packageName
+                                    2 -> name               // display name
+                                    else -> null            // uniqueId
+                                }
+                            }
+                            type == Int::class.javaPrimitiveType -> {
+                                intCount++
+                                args[i] = when (intCount) {
+                                    1 -> width
+                                    2 -> height
+                                    3 -> dpi
+                                    4 -> VIRTUAL_DISPLAY_FLAGS
+                                    else -> 0
+                                }
+                            }
+                            type.name.contains("IVirtualDisplayCallback") -> args[i] = null
+                            type.name.contains("IMediaProjection") -> args[i] = null
+                            type == IBinder::class.java -> args[i] = null
+                            else -> args[i] = null
                         }
                     }
-                    paramTypes[i] == Surface::class.java -> args[i] = surface
-                    paramTypes[i] == IBinder::class.java -> args[i] = null
-                    else -> args[i] = null
-                }
-            }
 
-            // More precise fallback if the heuristic above needs direct mapping:
-            // Standard AOSP signature:
-            // createVirtualDisplay(IVirtualDisplayCallback callback, IMediaProjection projection,
-            //                      String packageName, String name, int width, int height, int densityDpi,
-            //                      Surface surface, int flags, String uniqueId)
-            val result = try {
-                createMethod.invoke(displayManagerService, *args)
-            } catch (e: Exception) {
-                Log.w(TAG, "First createVirtualDisplay attempt failed, trying DisplayManagerGlobal", e)
-                createViaDisplayManagerGlobal(name, width, height, dpi, surface)
-            }
+                    Log.i(TAG, "Invoking IDisplayManager.createVirtualDisplay with ${args.size} params: ${paramTypes.map { it.simpleName }}")
+                    val result = method.invoke(displayManagerService, *args)
+                    virtualDisplayToken = result
 
-            virtualDisplayToken = result
-            if (result is Int) {
-                virtualDisplayId = result
-            } else if (result != null) {
-                // If it returns a token or VirtualDisplay object, get the display ID
-                try {
-                    val getDisplayId = result.javaClass.getMethod("getDisplayId")
-                    virtualDisplayId = getDisplayId.invoke(result) as Int
+                    if (result is Int) {
+                        displayId = result
+                    } else if (result != null) {
+                        try {
+                            val idMethod = result.javaClass.getMethod("getDisplayId")
+                            displayId = idMethod.invoke(result) as Int
+                        } catch (e: Exception) {
+                            val getDisplay = result.javaClass.getMethod("getDisplay")
+                            val displayObj = getDisplay.invoke(result)
+                            val idMethod = displayObj.javaClass.getMethod("getDisplayId")
+                            displayId = idMethod.invoke(displayObj) as Int
+                        }
+                    }
+
+                    if (displayId >= 0) {
+                        Log.i(TAG, "Successfully created VirtualDisplay with ID: $displayId")
+                        break
+                    }
                 } catch (e: Exception) {
-                    val getDisplay = result.javaClass.getMethod("getDisplay")
-                    val displayObj = getDisplay.invoke(result)
-                    val idMethod = displayObj.javaClass.getMethod("getDisplayId")
-                    virtualDisplayId = idMethod.invoke(displayObj) as Int
+                    Log.w(TAG, "Failed overload attempt: ${e.message}")
                 }
             }
 
-            Log.i(TAG, "VirtualDisplay created successfully with ID: $virtualDisplayId")
-
-            // Enable freeform mode on this display
-            if (virtualDisplayId >= 0) {
-                setDisplayWindowingMode(virtualDisplayId, 5) // 5 = WINDOWING_MODE_FREEFORM
+            if (displayId < 0) {
+                throw RuntimeException("Could not create VirtualDisplay via any IDisplayManager method overload")
             }
 
-            return virtualDisplayId
+            virtualDisplayId = displayId
+
+            // Configure windowing mode and launch launcher/DeX on the new display
+            setupDisplayDesktop(displayId)
+
+            return displayId
         } catch (e: Exception) {
             Log.e(TAG, "Failed to create VirtualDisplay", e)
             throw RuntimeException("Failed to create VirtualDisplay: ${e.message}", e)
         }
     }
 
-    private fun createViaDisplayManagerGlobal(
-        name: String,
-        width: Int,
-        height: Int,
-        dpi: Int,
-        surface: Surface
-    ): Any? {
-        val dmgClass = Class.forName("android.hardware.display.DisplayManagerGlobal")
-        val getInstanceMethod = dmgClass.getMethod("getInstance")
-        val dmg = getInstanceMethod.invoke(null)
+    private fun setupDisplayDesktop(displayId: Int) {
+        try {
+            // 1. Force freeform windowing mode
+            Runtime.getRuntime().exec(arrayOf("wm", "set-display-windowing-mode", "-d", "$displayId", "5")).waitFor()
+            Runtime.getRuntime().exec(arrayOf("settings", "put", "global", "enable_freeform_support", "1")).waitFor()
 
-        val methods = dmg.javaClass.methods
-        val createMethod = methods.first { it.name == "createVirtualDisplay" }
-        val paramTypes = createMethod.parameterTypes
-        val args = arrayOfNulls<Any>(paramTypes.size)
+            // 2. Launch Home/DeX Desktop Launcher on the virtual display to start rendering content
+            Log.i(TAG, "Launching Desktop Launcher on display $displayId...")
+            Runtime.getRuntime().exec(arrayOf(
+                "am", "start",
+                "-a", "android.intent.action.MAIN",
+                "-c", "android.intent.category.HOME",
+                "--display", "$displayId"
+            )).waitFor()
 
-        for (i in paramTypes.indices) {
-            when {
-                paramTypes[i] == String::class.java -> args[i] = name
-                paramTypes[i] == Int::class.javaPrimitiveType -> {
-                    val remainingInts = paramTypes.take(i + 1).count { it == Int::class.javaPrimitiveType }
-                    args[i] = when (remainingInts) {
-                        1 -> width
-                        2 -> height
-                        3 -> dpi
-                        4 -> VIRTUAL_DISPLAY_FLAGS
-                        else -> 0
-                    }
-                }
-                paramTypes[i] == Surface::class.java -> args[i] = surface
-                else -> args[i] = null
+            // 3. Specifically launch Samsung Desktop Launcher if present
+            try {
+                Runtime.getRuntime().exec(arrayOf(
+                    "am", "start",
+                    "-n", "com.sec.android.app.desktoplauncher/.DesktopLauncher",
+                    "--display", "$displayId"
+                )).waitFor()
+            } catch (e: Exception) {
+                // Ignore if not present
             }
-        }
 
-        return createMethod.invoke(dmg, *args)
+            Log.i(TAG, "Desktop setup completed on display $displayId")
+        } catch (e: Exception) {
+            Log.w(TAG, "Error setting up display desktop", e)
+        }
     }
 
     override fun releaseVirtualDisplay() {
@@ -235,7 +247,6 @@ class DexUserService : IDexUserService.Stub() {
             if (displayId >= 0 && setDisplayIdMethod != null) {
                 setDisplayIdMethod?.invoke(event, displayId)
             }
-            // 0 = INJECT_INPUT_EVENT_MODE_ASYNC
             injectInputMethod?.invoke(inputManager, event, 0) as? Boolean ?: true
         } catch (e: Exception) {
             Log.w(TAG, "Failed to inject MotionEvent", e)
