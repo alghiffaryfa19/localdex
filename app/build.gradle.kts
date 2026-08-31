@@ -34,6 +34,10 @@ android {
         disable += "ExpiredTargetSdkVersion"
     }
 
+    buildFeatures {
+        aidl = true
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
@@ -50,6 +54,11 @@ dependencies {
     implementation("com.google.android.material:material:1.11.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
+
+    // Shizuku API for rootless elevated shell privilege
+    val shizukuVersion = "13.1.5"
+    implementation("dev.rikka.shizuku:api:$shizukuVersion")
+    implementation("dev.rikka.shizuku:provider:$shizukuVersion")
 
     // LibADB Android — app-to-own-device ADB over wireless debugging
     implementation("com.github.MuntashirAkon:libadb-android:3.1.0")

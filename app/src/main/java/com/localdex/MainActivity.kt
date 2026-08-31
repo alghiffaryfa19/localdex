@@ -1,34 +1,31 @@
 package com.localdex
 
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.hardware.display.DisplayManager
 import android.os.Bundle
 import android.provider.Settings
 import android.view.View
-import android.widget.Button
-import android.widget.EditText
-import android.widget.TextView
-import android.widget.Toast
+import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.lifecycleScope
-import com.localdex.scrcpy.ScrcpySession
+import com.localdex.shizuku.ShizukuSessionManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import rikka.shizuku.Shizuku
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListener {
 
     private lateinit var statusText: TextView
     private lateinit var actionButton: Button
     private lateinit var refreshButton: Button
     private lateinit var configGroup: View
-    private lateinit var targetDisplaySpinner: android.widget.Spinner
     private lateinit var displaySpecField: EditText
     private lateinit var startButton: Button
     private lateinit var viewerButton: Button
     private lateinit var stopButton: Button
-
-    private val displays = mutableListOf<android.view.Display>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -38,13 +35,11 @@ class MainActivity : AppCompatActivity() {
         actionButton = findViewById(R.id.actionButton)
         refreshButton = findViewById(R.id.refreshButton)
         configGroup = findViewById(R.id.configGroup)
-        targetDisplaySpinner = findViewById(R.id.targetDisplaySpinner)
         displaySpecField = findViewById(R.id.displaySpecField)
         startButton = findViewById(R.id.startButton)
         viewerButton = findViewById(R.id.viewerButton)
         stopButton = findViewById(R.id.stopButton)
 
-        setupDisplaySpinner()
         displaySpecField.setText(Prefs.getDisplaySpec(this))
 
         refreshButton.setOnClickListener { checkStatus(forceCheck = true) }
@@ -54,118 +49,76 @@ class MainActivity : AppCompatActivity() {
             DexService.stop(this)
             statusText.postDelayed({ checkStatus() }, 500)
         }
+
+        Shizuku.addRequestPermissionResultListener(this)
+        Shizuku.addBinderReceivedListenerSticky {
+            checkStatus()
+        }
     }
 
-    private fun setupDisplaySpinner() {
-        val displayManager = getSystemService(android.content.Context.DISPLAY_SERVICE) as android.hardware.display.DisplayManager
-        displays.clear()
-        displays.addAll(displayManager.displays)
+    override fun onDestroy() {
+        super.onDestroy()
+        Shizuku.removeRequestPermissionResultListener(this)
+    }
 
-        val adapter = android.widget.ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_item,
-            displays.map { "${it.name} (${it.displayId}) - ${it.mode.physicalWidth}x${it.mode.physicalHeight}" }
-        )
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        targetDisplaySpinner.adapter = adapter
-
-        val savedDisplayId = Prefs.getTargetDisplayId(this)
-        val selectedIndex = displays.indexOfFirst { it.displayId == savedDisplayId }.takeIf { it >= 0 } ?: 0
-        targetDisplaySpinner.setSelection(selectedIndex)
-
-        targetDisplaySpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
-                val display = displays[position]
-                Prefs.setTargetDisplayId(this@MainActivity, display.displayId)
-                // Use comfortable DPI (240) by default
-                val spec = "${display.mode.physicalWidth}x${display.mode.physicalHeight}/240"
-                displaySpecField.setText(spec)
-                Prefs.setDisplaySpec(this@MainActivity, spec)
-            }
-            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+    override fun onRequestPermissionResult(requestCode: Int, grantResult: Int) {
+        if (grantResult == PackageManager.PERMISSION_GRANTED) {
+            Toast.makeText(this, "Shizuku permission granted!", Toast.LENGTH_SHORT).show()
+            checkStatus()
+        } else {
+            Toast.makeText(this, "Shizuku permission was denied", Toast.LENGTH_LONG).show()
+            checkStatus()
         }
     }
 
     private fun openViewer() {
-        val targetDisplayId = Prefs.getTargetDisplayId(this)
-        val bundle = android.app.ActivityOptions.makeBasic().setLaunchDisplayId(targetDisplayId).toBundle()
-        // 1 = WINDOWING_MODE_FULLSCREEN
-        bundle?.putInt("android.activity.windowingMode", 1)
         val intent = Intent(this, ViewerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        startActivity(intent, bundle)
-    }
-
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
+        startActivity(intent)
     }
 
     override fun onResume() {
         super.onResume()
-        val fromPairing = intent?.getBooleanExtra(EXTRA_FROM_PAIRING, false) == true
-        if (fromPairing) {
-            intent.removeExtra(EXTRA_FROM_PAIRING)
-        }
-        checkStatus(forceCheck = fromPairing)
+        checkStatus()
     }
 
     private fun checkStatus(forceCheck: Boolean = false) {
-        if (ScrcpySession.current != null) {
+        if (ShizukuSessionManager.currentDisplayId >= 0) {
             showRunningState()
             return
         }
 
-        lifecycleScope.launch {
-            val status = withContext(Dispatchers.IO) {
-                Adb.getConnectionStatus(this@MainActivity, forceCheck)
-            }
-
-            when (status) {
-                Adb.ConnectionStatus.CONNECTED -> {
-                    showConnectedState()
-                    stopService(Intent(this@MainActivity, PairingInputService::class.java))
-                    Prefs.setHasPairedBefore(this@MainActivity)
-                    acquireWirelessDebuggingPermission()
-                }
-                else -> {
-                    // Holding WRITE_SECURE_SETTINGS lets us switch wireless debugging
-                    // back on ourselves (it turns off on reboot / network change).
-                    if (Prefs.hasPairedBefore(this@MainActivity) &&
-                        !WirelessDebugging.isEnabled(this@MainActivity) &&
-                        WirelessDebugging.canToggle(this@MainActivity)
-                    ) {
-                        statusText.text = "Turning wireless debugging on…"
-                        val enabled = WirelessDebugging.enable(this@MainActivity)
-                        if (enabled) {
-                            checkStatus(forceCheck = true)
-                            return@launch
-                        }
-                    }
-                    showSetupChecklist()
-                }
-            }
+        if (ShizukuSessionManager.hasShizukuPermission()) {
+            showConnectedState()
+        } else if (ShizukuSessionManager.isShizukuAvailable()) {
+            showShizukuNeedPermissionState()
+        } else {
+            // Fallback: check Wireless ADB if Shizuku is not running
+            checkAdbFallback(forceCheck)
         }
     }
 
-    private fun acquireWirelessDebuggingPermission() {
-        if (permissionGrantAttempted || WirelessDebugging.canToggle(this)) return
-        permissionGrantAttempted = true
-        lifecycleScope.launch {
-            WirelessDebugging.tryAcquireTogglePermission(this@MainActivity)
+    private fun showShizukuNeedPermissionState() {
+        statusText.text = buildString {
+            append("⚡ Shizuku Service Detected!\n\n")
+            append("LocalDex can run with Hardware Direct Surface (zero video encoding, maximum battery efficiency).\n\n")
+            append("Please grant Shizuku permission to continue.")
         }
+        actionButton.text = "Grant Shizuku Permission"
+        actionButton.setOnClickListener {
+            ShizukuSessionManager.requestPermission(SHIZUKU_PERMISSION_REQUEST_CODE)
+        }
+        actionButton.visibility = View.VISIBLE
+        refreshButton.visibility = View.VISIBLE
+        configGroup.visibility = View.GONE
+        startButton.visibility = View.GONE
+        viewerButton.visibility = View.GONE
+        stopButton.visibility = View.GONE
     }
 
     private fun showRunningState() {
-        val displayId = ScrcpySession.current?.displayId ?: -1
-        statusText.text = if (displayId >= 0) {
-            "🖥️ DeX is running on display $displayId.\n\n" +
-                "From a computer on the same adb connection you can open the same " +
-                "desktop with:\n\nscrcpy --display-id=$displayId"
-        } else {
-            // The display id arrives from the server log moments after start.
-            statusText.postDelayed({ if (ScrcpySession.current != null) checkStatus() }, 1000)
-            "🖥️ DeX session is starting…"
-        }
+        val displayId = ShizukuSessionManager.currentDisplayId
+        statusText.text = "🖥️ DeX is running with Direct Surface on display $displayId.\n\n" +
+            "Zero video encoding overhead / 60+ FPS hardware composite."
         actionButton.visibility = View.GONE
         refreshButton.visibility = View.GONE
         configGroup.visibility = View.GONE
@@ -175,9 +128,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showConnectedState() {
-        statusText.text = "✅ ADB connected.\n\n" +
-            "Display spec is WIDTHxHEIGHT/DPI — lower DPI means more room, higher " +
-            "DPI means bigger UI."
+        statusText.text = "⚡ Shizuku connected (Elevated Shell Mode).\n\n" +
+            "Hardware Direct Surface active — zero video encode/decode latency.\n" +
+            "Display spec is WIDTHxHEIGHT/DPI (e.g. 1920x1440/240)."
         actionButton.visibility = View.GONE
         refreshButton.visibility = View.VISIBLE
         configGroup.visibility = View.VISIBLE
@@ -186,62 +139,48 @@ class MainActivity : AppCompatActivity() {
         stopButton.visibility = View.GONE
     }
 
-    private fun showSetupChecklist() {
-        val devModeEnabled = isDeveloperOptionsEnabled()
-        val notificationsEnabled = NotificationManagerCompat.from(this).areNotificationsEnabled()
-
-        val step1 = if (devModeEnabled) "✅" else "⬜"
-        val step2 = if (notificationsEnabled) "✅" else "⬜"
-        val step3 = if (devModeEnabled && notificationsEnabled) "⬜" else "⚪"
-
-        statusText.text = buildString {
-            append("Setup Progress:\n\n")
-            append("$step1 Step 1: Enable Developer Options\n")
-            if (!devModeEnabled) {
-                append("   • Settings → About phone → Software information\n")
-                append("   • Tap \"Build number\" 7 times\n\n")
-            } else {
-                append("   Complete!\n\n")
+    private fun checkAdbFallback(forceCheck: Boolean) {
+        lifecycleScope.launch {
+            val status = withContext(Dispatchers.IO) {
+                Adb.getConnectionStatus(this@MainActivity, forceCheck)
             }
-            append("$step2 Step 2: Enable Notifications\n")
-            if (!notificationsEnabled) {
-                append("   • Required to enter pairing codes\n\n")
-            } else {
-                append("   Complete!\n\n")
-            }
-            append("$step3 Step 3: Pair with Wireless ADB\n")
-            if (devModeEnabled && notificationsEnabled) {
-                append("   • Tap \"Start Pairing\" below\n")
-                append("   • In Wireless debugging, tap \"Pair device with pairing code\"\n")
-                append("   • Enter the code in the LocalDex notification\n")
-            } else {
-                append("   Complete previous steps first\n")
+
+            when (status) {
+                Adb.ConnectionStatus.CONNECTED -> {
+                    statusText.text = "✅ ADB connected (Legacy mode).\n\n" +
+                        "Tip: For better performance & battery life, start Shizuku!"
+                    actionButton.visibility = View.GONE
+                    refreshButton.visibility = View.VISIBLE
+                    configGroup.visibility = View.VISIBLE
+                    startButton.visibility = View.VISIBLE
+                    viewerButton.visibility = View.GONE
+                    stopButton.visibility = View.GONE
+                }
+                else -> {
+                    showSetupChecklist()
+                }
             }
         }
+    }
 
-        when {
-            !devModeEnabled -> {
-                actionButton.text = "Open Settings"
-                actionButton.setOnClickListener {
-                    try {
-                        startActivity(Intent(Settings.ACTION_SETTINGS))
-                    } catch (e: Exception) {
-                        Toast.makeText(this, "Please open Settings manually", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            }
-            !notificationsEnabled -> {
-                actionButton.text = "Enable Notifications"
-                actionButton.setOnClickListener {
-                    startActivity(
-                        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                            .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
-                    )
-                }
-            }
-            else -> {
-                actionButton.text = "Start Pairing"
-                actionButton.setOnClickListener { startPairing() }
+    private fun showSetupChecklist() {
+        statusText.text = buildString {
+            append("Setup Required:\n\n")
+            append("Option 1 (Recommended): Start Shizuku\n")
+            append("   • Open Shizuku app\n")
+            append("   • Start Shizuku via Wireless Debugging\n")
+            append("   • Return here and tap Refresh\n\n")
+            append("Option 2: Pair Wireless ADB directly\n")
+            append("   • Tap \"Start Pairing\" below\n")
+        }
+
+        actionButton.text = "Open Shizuku / Start Pairing"
+        actionButton.setOnClickListener {
+            val shizukuIntent = packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")
+            if (shizukuIntent != null) {
+                startActivity(shizukuIntent)
+            } else {
+                startPairing()
             }
         }
 
@@ -282,23 +221,8 @@ class MainActivity : AppCompatActivity() {
         openViewer()
     }
 
-    private fun isDeveloperOptionsEnabled(): Boolean {
-        return try {
-            Settings.Global.getInt(
-                contentResolver,
-                Settings.Global.DEVELOPMENT_SETTINGS_ENABLED,
-                0
-            ) == 1
-        } catch (e: Exception) {
-            true
-        }
-    }
-
     companion object {
-        /** Set by [PairingInputService] when it brings the app forward after pairing. */
         const val EXTRA_FROM_PAIRING = "com.localdex.FROM_PAIRING"
-
-        // Only try the self-grant once per session.
-        private var permissionGrantAttempted = false
+        private const val SHIZUKU_PERMISSION_REQUEST_CODE = 1001
     }
 }

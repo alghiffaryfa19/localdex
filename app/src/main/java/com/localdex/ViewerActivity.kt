@@ -2,13 +2,7 @@ package com.localdex
 
 import android.annotation.SuppressLint
 import android.os.Bundle
-import android.view.InputDevice
-import android.view.KeyEvent
-import android.view.MotionEvent
-import android.view.SurfaceHolder
-import android.view.SurfaceView
-import android.view.View
-import android.view.WindowManager
+import android.view.*
 import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
@@ -20,15 +14,13 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import com.localdex.scrcpy.ScrcpySession
+import com.localdex.shizuku.ShizukuSessionManager
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /**
  * Fullscreen interactive view of the DeX display.
- *
- * Touch is forwarded to the mirrored display; the system Back gesture/button is
- * forwarded as a DeX Back key. Closing happens through the ✕ button (with
- * confirmation) or the persistent notification's Stop action.
+ * Supports Direct Hardware Surface (via Shizuku) or Legacy scrcpy decoder.
  */
 class ViewerActivity : AppCompatActivity() {
 
@@ -41,6 +33,9 @@ class ViewerActivity : AppCompatActivity() {
     private var surfaceReady = false
     private var surfaceGivenToDecoder = false
 
+    private val isShizukuMode: Boolean
+        get() = ShizukuSessionManager.hasShizukuPermission()
+
     private val session: ScrcpySession?
         get() = ScrcpySession.current
 
@@ -48,8 +43,7 @@ class ViewerActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val activeSession = session
-        if (activeSession == null) {
+        if (!isShizukuMode && session == null) {
             finish()
             return
         }
@@ -68,7 +62,11 @@ class ViewerActivity : AppCompatActivity() {
             override fun surfaceCreated(holder: SurfaceHolder) {
                 surfaceReady = true
                 surfaceGivenToDecoder = false
-                offerSurface()
+                if (isShizukuMode) {
+                    startShizukuDisplay(holder.surface)
+                } else {
+                    offerSurface()
+                }
             }
 
             override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
@@ -76,41 +74,93 @@ class ViewerActivity : AppCompatActivity() {
             override fun surfaceDestroyed(holder: SurfaceHolder) {
                 surfaceReady = false
                 surfaceGivenToDecoder = false
-                session?.videoDecoder?.clearSurface()
+                if (isShizukuMode) {
+                    ShizukuSessionManager.stopSession()
+                } else {
+                    session?.videoDecoder?.clearSurface()
+                }
             }
         })
 
         surfaceView.setOnTouchListener { view, event ->
-            val s = session ?: return@setOnTouchListener false
-            s.controller?.forwardMotionEvent(
-                event, view.width, view.height, s.videoWidth, s.videoHeight
-            )
+            if (isShizukuMode) {
+                forwardShizukuMotionEvent(event, view.width, view.height)
+            } else {
+                val s = session ?: return@setOnTouchListener false
+                s.controller?.forwardMotionEvent(
+                    event, view.width, view.height, s.videoWidth, s.videoHeight
+                )
+            }
             updateCursor(event)
             true
         }
 
-        // Physical mouse: hover moves, scroll wheel, right-click, middle-click.
-        // These arrive as generic motion events, not touch events.
         surfaceView.setOnGenericMotionListener { view, event ->
-            val s = session ?: return@setOnGenericMotionListener false
-            s.controller?.forwardGenericMotionEvent(
-                event, view.width, view.height, s.videoWidth, s.videoHeight
-            )
+            if (isShizukuMode) {
+                forwardShizukuMotionEvent(event, view.width, view.height)
+            } else {
+                val s = session ?: return@setOnGenericMotionListener false
+                s.controller?.forwardGenericMotionEvent(
+                    event, view.width, view.height, s.videoWidth, s.videoHeight
+                )
+            }
             updateCursor(event)
             true
         }
 
         makeCloseButtonDraggable()
 
-        // Fold/unfold and rotation change the container size without recreating the
-        // activity (configChanges); keep the surface at the video's aspect ratio.
-        root.addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or, ob ->
-            if (r - l != or - ol || b - t != ob - ot) {
-                val s = session ?: return@addOnLayoutChangeListener
-                if (s.videoWidth > 0) applyAspectRatio(s.videoWidth, s.videoHeight)
+        if (isShizukuMode) {
+            observeShizukuState()
+        } else {
+            observeScrcpyState()
+        }
+    }
+
+    private fun startShizukuDisplay(surface: Surface) {
+        val spec = Prefs.getDisplaySpec(this)
+        val match = Regex("(\\d{3,4})x(\\d{3,4})/(\\d{2,3})").find(spec)
+        val width = match?.groupValues?.get(1)?.toIntOrNull() ?: 1920
+        val height = match?.groupValues?.get(2)?.toIntOrNull() ?: 1440
+        val dpi = match?.groupValues?.get(3)?.toIntOrNull() ?: 240
+
+        applyAspectRatio(width, height)
+
+        lifecycleScope.launch {
+            statusText.text = "Starting Direct Surface (Shizuku)…"
+            ShizukuSessionManager.startSession(this@ViewerActivity, surface, width, height, dpi)
+        }
+    }
+
+    private fun observeShizukuState() {
+        lifecycleScope.launch {
+            ShizukuSessionManager.state.collectLatest { state ->
+                when (state) {
+                    is ShizukuSessionManager.State.Idle -> {}
+                    is ShizukuSessionManager.State.Connecting -> {
+                        statusText.visibility = View.VISIBLE
+                        statusText.text = "Initializing Hardware Surface…"
+                    }
+                    is ShizukuSessionManager.State.Running -> {
+                        statusText.visibility = View.GONE
+                        applyAspectRatio(state.width, state.height)
+                    }
+                    is ShizukuSessionManager.State.Error -> {
+                        statusText.visibility = View.VISIBLE
+                        statusText.text = "Error: ${state.message}"
+                        AlertDialog.Builder(this@ViewerActivity)
+                            .setTitle("Shizuku DeX Error")
+                            .setMessage(state.message)
+                            .setPositiveButton("OK") { _, _ -> finish() }
+                            .show()
+                    }
+                }
             }
         }
+    }
 
+    private fun observeScrcpyState() {
+        val activeSession = session ?: return
         lifecycleScope.launch {
             activeSession.state.collectLatest { state ->
                 when (state) {
@@ -137,6 +187,23 @@ class ViewerActivity : AppCompatActivity() {
         }
     }
 
+    private fun forwardShizukuMotionEvent(event: MotionEvent, viewWidth: Int, viewHeight: Int) {
+        val spec = Prefs.getDisplaySpec(this)
+        val match = Regex("(\\d{3,4})x(\\d{3,4})/(\\d{2,3})").find(spec)
+        val targetWidth = match?.groupValues?.get(1)?.toIntOrNull() ?: 1920
+        val targetHeight = match?.groupValues?.get(2)?.toIntOrNull() ?: 1440
+
+        if (viewWidth == 0 || viewHeight == 0) return
+
+        val scaleX = targetWidth.toFloat() / viewWidth
+        val scaleY = targetHeight.toFloat() / viewHeight
+
+        val transformedEvent = MotionEvent.obtain(event)
+        transformedEvent.setLocation(event.x * scaleX, event.y * scaleY)
+        ShizukuSessionManager.injectMotionEvent(transformedEvent)
+        transformedEvent.recycle()
+    }
+
     /** Hands the surface to the decoder once both exist. Idempotent. */
     private fun offerSurface() {
         if (!surfaceReady || surfaceGivenToDecoder) return
@@ -160,27 +227,18 @@ class ViewerActivity : AppCompatActivity() {
             val params = surfaceView.layoutParams as FrameLayout.LayoutParams
             params.width = (videoWidth * scale).toInt()
             params.height = (videoHeight * scale).toInt()
-            params.gravity = android.view.Gravity.CENTER
+            params.gravity = Gravity.CENTER
             surfaceView.layoutParams = params
         }
     }
 
-    /**
-     * Moves the software cursor overlay to the event's position. Always shown
-     * for any pointer event — on mirror-mode HDMI displays the event source may
-     * not report SOURCE_MOUSE even when a physical mouse is in use.
-     */
     private fun updateCursor(event: MotionEvent) {
         when (event.actionMasked) {
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                // Hide briefly on finger lift; hover events will re-show it
-                // immediately if a mouse is still moving.
                 return
             }
         }
 
-        // Position the cursor's top-left (hotspot) at the event coordinates,
-        // translated into the root FrameLayout's coordinate space.
         val loc = IntArray(2)
         surfaceView.getLocationInWindow(loc)
         cursorView.translationX = loc[0] + event.x
@@ -191,13 +249,9 @@ class ViewerActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * Tap: stop dialog. Tap-and-hold: drag the button anywhere — it sits where DeX
-     * draws its window controls, so it has to be able to get out of the way.
-     */
     @SuppressLint("ClickableViewAccessibility")
     private fun makeCloseButtonDraggable() {
-        val slop = android.view.ViewConfiguration.get(this).scaledTouchSlop
+        val slop = ViewConfiguration.get(this).scaledTouchSlop
         var downRawX = 0f
         var downRawY = 0f
         var startTx = 0f
@@ -206,12 +260,12 @@ class ViewerActivity : AppCompatActivity() {
         val startDrag = Runnable {
             dragging = true
             closeButton.alpha = 0.9f
-            closeButton.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+            closeButton.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
         }
 
         closeButton.setOnTouchListener { view, event ->
             when (event.actionMasked) {
-                android.view.MotionEvent.ACTION_DOWN -> {
+                MotionEvent.ACTION_DOWN -> {
                     downRawX = event.rawX
                     downRawY = event.rawY
                     startTx = view.translationX
@@ -220,19 +274,18 @@ class ViewerActivity : AppCompatActivity() {
                     view.postDelayed(startDrag, 350)
                     true
                 }
-                android.view.MotionEvent.ACTION_MOVE -> {
+                MotionEvent.ACTION_MOVE -> {
                     val dx = event.rawX - downRawX
                     val dy = event.rawY - downRawY
                     if (dragging) {
                         view.translationX = startTx + dx
                         view.translationY = startTy + dy
                     } else if (dx * dx + dy * dy > slop * slop) {
-                        // Moved before the hold completed: not a tap, not a drag.
                         view.removeCallbacks(startDrag)
                     }
                     true
                 }
-                android.view.MotionEvent.ACTION_UP -> {
+                MotionEvent.ACTION_UP -> {
                     view.removeCallbacks(startDrag)
                     val dx = event.rawX - downRawX
                     val dy = event.rawY - downRawY
@@ -244,7 +297,7 @@ class ViewerActivity : AppCompatActivity() {
                     }
                     true
                 }
-                android.view.MotionEvent.ACTION_CANCEL -> {
+                MotionEvent.ACTION_CANCEL -> {
                     view.removeCallbacks(startDrag)
                     if (dragging) {
                         dragging = false
@@ -258,26 +311,31 @@ class ViewerActivity : AppCompatActivity() {
     }
 
     private fun confirmStop() {
-        val displayId = session?.displayId ?: -1
+        val displayId = if (isShizukuMode) ShizukuSessionManager.currentDisplayId else (session?.displayId ?: -1)
         val displayNote = if (displayId >= 0) "\n\nVirtual display id: $displayId" else ""
         AlertDialog.Builder(this)
             .setTitle("Stop DeX?")
             .setMessage(
-                "This ends the session and removes the virtual display. You can also " +
-                    "leave with Home and come back via the notification.$displayNote"
+                "This ends the session and removes the virtual display.$displayNote"
             )
             .setPositiveButton("Stop") { _, _ ->
                 DexService.stop(this)
+                if (isShizukuMode) {
+                    ShizukuSessionManager.stopSession()
+                }
+                finish()
             }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
-    // Forward Back (hardware key and gesture alike) to DeX instead of leaving the
-    // viewer; leaving is done via the ✕ button, Home, or the notification.
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         if (keyCode == KeyEvent.KEYCODE_BACK) {
-            session?.controller?.sendKeyPress(KeyEvent.KEYCODE_BACK)
+            if (isShizukuMode) {
+                ShizukuSessionManager.injectKeyEvent(event)
+            } else {
+                session?.controller?.sendKeyPress(KeyEvent.KEYCODE_BACK)
+            }
             return true
         }
         return super.onKeyDown(keyCode, event)
@@ -285,13 +343,20 @@ class ViewerActivity : AppCompatActivity() {
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        session?.controller?.sendKeyPress(KeyEvent.KEYCODE_BACK)
+        val down = KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BACK)
+        val up = KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BACK)
+        if (isShizukuMode) {
+            ShizukuSessionManager.injectKeyEvent(down)
+            ShizukuSessionManager.injectKeyEvent(up)
+        } else {
+            session?.controller?.sendKeyPress(KeyEvent.KEYCODE_BACK)
+        }
     }
 
     override fun onResume() {
         super.onResume()
         hideSystemBars()
-        if (session == null) finish()
+        if (!isShizukuMode && session == null) finish()
     }
 
     private fun hideSystemBars() {

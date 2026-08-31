@@ -12,6 +12,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.localdex.scrcpy.ScrcpySession
+import com.localdex.shizuku.ShizukuSessionManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -30,6 +31,7 @@ class DexService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
+                ShizukuSessionManager.stopSession()
                 ScrcpySession.current?.stop()
                 shutDown()
                 return START_NOT_STICKY
@@ -38,21 +40,35 @@ class DexService : Service() {
                 createNotificationChannel()
                 startForeground(NOTIFICATION_ID, buildNotification())
 
-                // The session is created in [Companion.start] (synchronously, in the
-                // caller) so the viewer can never race an async service start.
-                val session = ScrcpySession.current
-                if (session == null) {
-                    shutDown()
-                } else {
+                val isShizuku = ShizukuSessionManager.hasShizukuPermission()
+                if (isShizuku) {
                     serviceScope.launch {
-                        session.state.collectLatest { state ->
+                        ShizukuSessionManager.state.collectLatest { state ->
                             when (state) {
-                                is ScrcpySession.State.Stopped -> shutDown()
-                                is ScrcpySession.State.Running -> {
+                                is ShizukuSessionManager.State.Idle -> shutDown()
+                                is ShizukuSessionManager.State.Running -> {
                                     getSystemService(NotificationManager::class.java)
                                         .notify(NOTIFICATION_ID, buildNotification(state.displayId))
                                 }
                                 else -> {}
+                            }
+                        }
+                    }
+                } else {
+                    val session = ScrcpySession.current
+                    if (session == null) {
+                        shutDown()
+                    } else {
+                        serviceScope.launch {
+                            session.state.collectLatest { state ->
+                                when (state) {
+                                    is ScrcpySession.State.Stopped -> shutDown()
+                                    is ScrcpySession.State.Running -> {
+                                        getSystemService(NotificationManager::class.java)
+                                            .notify(NOTIFICATION_ID, buildNotification(state.displayId))
+                                    }
+                                    else -> {}
+                                }
                             }
                         }
                     }
@@ -69,7 +85,7 @@ class DexService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        // The service dying must never leave a session (and the overlay display) behind.
+        ShizukuSessionManager.stopSession()
         ScrcpySession.current?.stop()
         serviceScope.cancel()
     }
@@ -81,17 +97,13 @@ class DexService : Service() {
             Intent(this, DexService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val targetDisplayId = Prefs.getTargetDisplayId(this)
-        val optionsBundle = android.app.ActivityOptions.makeBasic().setLaunchDisplayId(targetDisplayId).toBundle()
-        optionsBundle?.putInt("android.activity.windowingMode", 1) // WINDOWING_MODE_FULLSCREEN
 
         val openIntent = PendingIntent.getActivity(
             this,
             2,
             Intent(this, ViewerActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            optionsBundle
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
@@ -129,7 +141,8 @@ class DexService : Service() {
         const val ACTION_STOP = "com.localdex.STOP_DEX"
 
         fun start(context: Context) {
-            if (ScrcpySession.current == null) {
+            val isShizuku = ShizukuSessionManager.hasShizukuPermission()
+            if (!isShizuku && ScrcpySession.current == null) {
                 val session = ScrcpySession(
                     context.applicationContext,
                     Prefs.getDisplaySpec(context),
