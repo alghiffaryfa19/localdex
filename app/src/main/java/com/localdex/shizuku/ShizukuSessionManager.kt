@@ -9,7 +9,6 @@ import android.util.Log
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.Surface
-import com.localdex.BuildConfig
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -104,11 +103,11 @@ object ShizukuSessionManager {
 
             try {
                 val args = Shizuku.UserServiceArgs(
-                    ComponentName(BuildConfig.APPLICATION_ID, DexUserService::class.java.name)
+                    ComponentName(context.packageName, DexUserService::class.java.name)
                 )
                     .daemon(false)
                     .processNameSuffix("dex_service")
-                    .debuggable(BuildConfig.DEBUG)
+                    .debuggable(false)
                     .version(1)
 
                 Shizuku.bindUserService(args, connection)
