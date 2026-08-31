@@ -123,14 +123,29 @@ class DexUserService : IDexUserService.Stub() {
                 // Force freeform windowing mode (AOSP Desktop Mode) like LocalDex does
                 Runtime.getRuntime().exec(arrayOf("wm", "set-display-windowing-mode", "-d", id.toString(), "5")).waitFor()
                 
-                // Launch Samsung DeX Launcher exactly as it appears in the system logs:
-                // explicit component, but WITH the SECONDARY_HOME category attached
+                // 1. Launch Samsung DeX Launcher (SecondaryLauncher)
                 android.util.Log.i(TAG, "Launching DeX (SecondaryLauncher) with SECONDARY_HOME category on display $id...")
                 Runtime.getRuntime().exec(arrayOf(
                     "am", "start",
                     "-a", "android.intent.action.MAIN",
                     "-c", "android.intent.category.SECONDARY_HOME",
                     "-n", "com.sec.android.app.launcher/com.honeyspace.dexservice.SecondaryLauncher",
+                    "--display", id.toString()
+                )).waitFor()
+
+                // 2. Launch RecentsActivity
+                android.util.Log.i(TAG, "Launching RecentsActivity on display $id...")
+                Runtime.getRuntime().exec(arrayOf(
+                    "am", "start",
+                    "-n", "com.sec.android.app.launcher/com.android.quickstep.RecentsActivity",
+                    "--display", id.toString()
+                )).waitFor()
+
+                // 3. Launch SystemUI SubHomeActivity
+                android.util.Log.i(TAG, "Launching SubHomeActivity on display $id...")
+                Runtime.getRuntime().exec(arrayOf(
+                    "am", "start",
+                    "-n", "com.android.systemui/.subscreen.SubHomeActivity",
                     "--display", id.toString()
                 )).waitFor()
 
@@ -146,37 +161,6 @@ class DexUserService : IDexUserService.Stub() {
         }
     }
 
-    private fun setupDisplayDesktop(displayId: Int) {
-        try {
-            // 1. Force freeform windowing mode
-            Runtime.getRuntime().exec(arrayOf("wm", "set-display-windowing-mode", "-d", "$displayId", "5")).waitFor()
-            Runtime.getRuntime().exec(arrayOf("settings", "put", "global", "enable_freeform_support", "1")).waitFor()
-
-            // 2. Launch Home/DeX Desktop Launcher on the virtual display to start rendering content
-            Log.i(TAG, "Launching Desktop Launcher on display $displayId...")
-            Runtime.getRuntime().exec(arrayOf(
-                "am", "start",
-                "-a", "android.intent.action.MAIN",
-                "-c", "android.intent.category.HOME",
-                "--display", "$displayId"
-            )).waitFor()
-
-            // 3. Specifically launch Samsung Desktop Launcher if present
-            try {
-                Runtime.getRuntime().exec(arrayOf(
-                    "am", "start",
-                    "-n", "com.sec.android.app.desktoplauncher/.DesktopLauncher",
-                    "--display", "$displayId"
-                )).waitFor()
-            } catch (e: Exception) {
-                // Ignore if not present
-            }
-
-            Log.i(TAG, "Desktop setup completed on display $displayId")
-        } catch (e: Exception) {
-            Log.w(TAG, "Error setting up display desktop", e)
-        }
-    }
 
     override fun releaseVirtualDisplay() {
         val token = virtualDisplayToken
