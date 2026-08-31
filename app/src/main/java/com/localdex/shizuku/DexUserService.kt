@@ -258,6 +258,14 @@ class DexUserService : IDexUserService.Stub() {
         }
     }
 
+    override fun onTransact(code: Int, data: android.os.Parcel, reply: android.os.Parcel?, flags: Int): Boolean {
+        if (code == 16777114) { // Shizuku constant for destroy
+            destroy()
+            return true
+        }
+        return super.onTransact(code, data, reply, flags)
+    }
+
     override fun destroy() {
         releaseVirtualDisplay()
         System.exit(0)

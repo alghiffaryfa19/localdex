@@ -5,7 +5,7 @@ import android.view.MotionEvent;
 import android.view.KeyEvent;
 
 interface IDexUserService {
-    void destroy() = 16777114; // Shizuku constant for destroy
+    void destroy();
 
     int createVirtualDisplay(String name, int width, int height, int dpi, in Surface surface);
     void releaseVirtualDisplay();
