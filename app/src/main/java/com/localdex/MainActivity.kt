@@ -88,8 +88,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun openViewer() {
         val targetDisplayId = Prefs.getTargetDisplayId(this)
-        val options = android.app.ActivityOptions.makeBasic().setLaunchDisplayId(targetDisplayId).toBundle()
-        startActivity(Intent(this, ViewerActivity::class.java), options)
+        val bundle = android.app.ActivityOptions.makeBasic().setLaunchDisplayId(targetDisplayId).toBundle()
+        // 1 = WINDOWING_MODE_FULLSCREEN
+        bundle?.putInt("android.activity.windowingMode", 1)
+        val intent = Intent(this, ViewerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        startActivity(intent, bundle)
     }
 
     override fun onNewIntent(intent: Intent) {

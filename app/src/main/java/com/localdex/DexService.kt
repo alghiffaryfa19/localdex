@@ -82,7 +82,8 @@ class DexService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val targetDisplayId = Prefs.getTargetDisplayId(this)
-        val options = android.app.ActivityOptions.makeBasic().setLaunchDisplayId(targetDisplayId).toBundle()
+        val optionsBundle = android.app.ActivityOptions.makeBasic().setLaunchDisplayId(targetDisplayId).toBundle()
+        optionsBundle?.putInt("android.activity.windowingMode", 1) // WINDOWING_MODE_FULLSCREEN
 
         val openIntent = PendingIntent.getActivity(
             this,
@@ -90,7 +91,7 @@ class DexService : Service() {
             Intent(this, ViewerActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            options
+            optionsBundle
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
