@@ -14,15 +14,17 @@ class DexUserService : IDexUserService.Stub() {
     companion object {
         private const val TAG = "DexUserService"
 
-        // VirtualDisplay flags from dex-dp:
-        // PUBLIC (1) | PRESENTATION (2) | TRUSTED (1024)
+        // VirtualDisplay flags matching scrcpy exactly (plus TRUSTED for Samsung DeX):
+        // PUBLIC (1) | OWN_CONTENT_ONLY (8) | DESTROY_CONTENT_ON_REMOVAL (256) | TRUSTED (1024)
         private const val VIRTUAL_DISPLAY_FLAG_PUBLIC = 1 shl 0
-        private const val VIRTUAL_DISPLAY_FLAG_PRESENTATION = 1 shl 1
+        private const val VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY = 1 shl 3
+        private const val VIRTUAL_DISPLAY_FLAG_DESTROY_CONTENT_ON_REMOVAL = 1 shl 8
         private const val VIRTUAL_DISPLAY_FLAG_TRUSTED = 1 shl 10
 
         private const val VIRTUAL_DISPLAY_FLAGS =
             VIRTUAL_DISPLAY_FLAG_PUBLIC or
-            VIRTUAL_DISPLAY_FLAG_PRESENTATION or
+            VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY or
+            VIRTUAL_DISPLAY_FLAG_DESTROY_CONTENT_ON_REMOVAL or
             VIRTUAL_DISPLAY_FLAG_TRUSTED
     }
 
