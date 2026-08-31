@@ -123,19 +123,14 @@ class DexUserService : IDexUserService.Stub() {
                 // Force freeform windowing mode (AOSP Desktop Mode) like LocalDex does
                 Runtime.getRuntime().exec(arrayOf("wm", "set-display-windowing-mode", "-d", id.toString(), "5")).waitFor()
                 
-                // 1. Launch Samsung DeX Launcher specifically to avoid Launcher Chooser dialogs
-                android.util.Log.i(TAG, "Launching DeX on display $id via shell...")
+                // Launch Samsung DeX Launcher exactly as it appears in the system logs:
+                // explicit component, but WITH the SECONDARY_HOME category attached
+                android.util.Log.i(TAG, "Launching DeX (SecondaryLauncher) with SECONDARY_HOME category on display $id...")
                 Runtime.getRuntime().exec(arrayOf(
                     "am", "start",
+                    "-a", "android.intent.action.MAIN",
+                    "-c", "android.intent.category.SECONDARY_HOME",
                     "-n", "com.sec.android.app.launcher/com.honeyspace.dexservice.SecondaryLauncher",
-                    "--display", id.toString()
-                )).waitFor()
-
-                // 2. Launch SystemUI's secondary home (SubHomeActivity on Z Flip) to trigger wallpaper rendering
-                android.util.Log.i(TAG, "Launching SystemUI (SubHomeActivity) for wallpaper on display $id...")
-                Runtime.getRuntime().exec(arrayOf(
-                    "am", "start",
-                    "-n", "com.android.systemui/.subscreen.SubHomeActivity",
                     "--display", id.toString()
                 )).waitFor()
 
