@@ -123,11 +123,20 @@ class DexUserService : IDexUserService.Stub() {
                 // Force freeform windowing mode (AOSP Desktop Mode) like LocalDex does
                 Runtime.getRuntime().exec(arrayOf("wm", "set-display-windowing-mode", "-d", id.toString(), "5")).waitFor()
                 
-                // Launch Samsung DeX Launcher specifically
-                android.util.Log.i(TAG, "Launching DeX on display $id via shell...")
+                // Launch generic SECONDARY_HOME to naturally trigger Samsung's SecondaryLauncher (DeX)
+                android.util.Log.i(TAG, "Triggering DeX environment on display $id via SECONDARY_HOME...")
                 Runtime.getRuntime().exec(arrayOf(
                     "am", "start",
-                    "-n", "com.sec.android.app.launcher/com.honeyspace.dexservice.SecondaryLauncher",
+                    "-a", "android.intent.action.MAIN",
+                    "-c", "android.intent.category.SECONDARY_HOME",
+                    "--display", id.toString()
+                )).waitFor()
+
+                // Launch DexModeActivity to ensure the environment (taskbar, window management) is initialized
+                android.util.Log.i(TAG, "Initializing DexModeActivity on display $id...")
+                Runtime.getRuntime().exec(arrayOf(
+                    "am", "start",
+                    "-n", "com.android.settings/.Settings\$DexModeActivity",
                     "--display", id.toString()
                 )).waitFor()
                 
